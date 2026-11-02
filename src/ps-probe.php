@@ -19,7 +19,8 @@
  * module_shops (shops where the module is enabled), hook_shops (hook => shops) and
  * configuration_scopes (key => 'global', 'g<id_shop_group>' or 's<id_shop>' rows).
  *
- * Usage: php ps-probe.php <module_name> <CONFIG_PREFIX>
+ * Usage: php ps-probe.php <module_name> <CONFIG_PREFIX>[,<LEGACY_PREFIX>...]
+ * Every key that starts with one of the prefixes plus "_" counts as configuration of the module.
  * With PS_MODULE_VERBOSE=1 (passed in by ps-test.php) it reports what it found on STDERR.
  */
 
@@ -30,7 +31,13 @@ if (!defined('_PS_ADMIN_DIR_')) {
 require_once $root . '/config/config.inc.php';
 
 $name = $argv[1];
-$prefix = $argv[2];
+$prefixes = array_values(array_filter(explode(',', $argv[2]), static fn (string $p): bool => $p !== ''));
+$prefix = implode('_, ', $prefixes);
+// name LIKE 'PREFIX\_%' for every prefix (the module's own and those of a legacy version).
+$configWhere = '(' . implode(' OR ', array_map(
+    static fn (string $p): string => 'name LIKE \'' . pSQL(str_replace('_', '\_', $p)) . '\\\\_%\'',
+    $prefixes
+)) . ')';
 $db = Db::getInstance();
 probeLog("shop $root, module $name, configuration prefix {$prefix}_, table prefix " . _DB_PREFIX_);
 
@@ -49,7 +56,7 @@ $hooks = $idModule ? array_column($db->executeS(
 
 $config = array_column($db->executeS(
     'SELECT DISTINCT name FROM `' . _DB_PREFIX_ . 'configuration`
-     WHERE name LIKE \'' . pSQL(str_replace('_', '\_', $prefix)) . '\\\\_%\' ORDER BY name'
+     WHERE ' . $configWhere . ' ORDER BY name'
 ) ?: [], 'name');
 
 // Multistore: in which shops the module and its hooks are enabled, and at which level
@@ -70,7 +77,7 @@ foreach ($idModule ? $db->executeS(
 $configurationScopes = [];
 foreach ($db->executeS(
     'SELECT DISTINCT name, id_shop_group, id_shop FROM `' . _DB_PREFIX_ . 'configuration`
-     WHERE name LIKE \'' . pSQL(str_replace('_', '\_', $prefix)) . '\\\\_%\' ORDER BY name, id_shop_group, id_shop'
+     WHERE ' . $configWhere . ' ORDER BY name, id_shop_group, id_shop'
 ) ?: [] as $row) {
     $configurationScopes[$row['name']][] = $row['id_shop'] !== null ? 's' . (int) $row['id_shop']
         : ($row['id_shop_group'] !== null ? 'g' . (int) $row['id_shop_group'] : 'global');

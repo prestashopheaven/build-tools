@@ -311,7 +311,10 @@ final class Shop
     {
         ps_vlog('snapshot: copying ps-probe.php into the container (/tmp/ps-probe.php) and running it');
         $this->compose('cp ' . escapeshellarg(__DIR__ . '/ps-probe.php') . ' prestashop:/tmp/ps-probe.php');
-        $result = $this->exec('php /tmp/ps-probe.php ' . escapeshellarg($this->config['module']) . ' ' . escapeshellarg(strtoupper($this->config['module'])));
+        // testing.json "legacy_configuration_prefixes": the key prefixes of an older version of the module from before
+        // module-kit (e.g. HEAVEN_DELIVERY_COPY), so the snapshots see its keys too (upgrades rename them).
+        $prefixes = array_merge([strtoupper($this->config['module'])], array_map('strval', (array) ($this->config['legacy_configuration_prefixes'] ?? [])));
+        $result = $this->exec('php /tmp/ps-probe.php ' . escapeshellarg($this->config['module']) . ' ' . escapeshellarg(implode(',', $prefixes)));
         $data = json_decode($result['output'], true);
         if (!is_array($data)) {
             fail("Snapshot failed:\n" . $result['output']);

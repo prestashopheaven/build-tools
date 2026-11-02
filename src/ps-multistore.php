@@ -755,6 +755,9 @@ function msUpgradeTests(Shop $shop, array $allShops): array
             $results[$label] = ['ok' => false, 'output' => "Could not export $tag"];
             continue;
         }
+        // A release without composer.json is a version from before module-kit (e.g. an Addons module rewritten as a
+        // new major): see msUpgradeStateProblems().
+        $legacy = !is_file($old . '/composer.json');
         $shop->deploy($old);
         removeDir(dirname($old));
         $install = $shop->console('install');
@@ -763,6 +766,9 @@ function msUpgradeTests(Shop $shop, array $allShops): array
             continue;
         }
         $before = $shop->snapshot();
+        ps_vlog("$label: " . ($legacy
+            ? 'legacy release (no composer.json): the module stays in the shops of before, renamed keys keep their shop and group rows'
+            : 'module-kit release'));
         msShopScript($shop, 'isolation', $name);
         $shop->deploy($moduleDir);
         $upgrade = $shop->console('upgrade');
@@ -776,19 +782,7 @@ function msUpgradeTests(Shop $shop, array $allShops): array
         if (!($kept['ok'] ?? false) && $problems === []) {
             $problems[] = 'keep-check failed';
         }
-        if (($after['module_shops'] ?? []) !== $allShops) {
-            $problems[] = 'after the upgrade the module is enabled in shops ' . json_encode($after['module_shops'] ?? []);
-        }
-        foreach ((array) ($after['hook_shops'] ?? []) as $hook => $shops) {
-            if ($shops !== $allShops) {
-                $problems[] = "after the upgrade hook $hook is registered for shops " . json_encode($shops);
-            }
-        }
-        foreach ((array) ($after['configuration_scopes'] ?? []) as $key => $scopes) {
-            if (!isset($before['configuration_scopes'][$key]) && $scopes !== ['global']) {
-                $problems[] = "new configuration $key has rows " . json_encode($scopes) . ', expected only a global value';
-            }
-        }
+        $problems = array_merge($problems, msUpgradeStateProblems($before, $after, $allShops, $legacy));
         $results[$label] = ['ok' => $problems === [], 'output' => implode("\n", $problems)];
         msShopScript($shop, 'reset', $name);
         $shop->console('uninstall');
@@ -797,6 +791,62 @@ function msUpgradeTests(Shop $shop, array $allShops): array
     $shop->console('install');
 
     return $results;
+}
+
+/**
+ * What is wrong with the state after a multistore upgrade, compared with the state of the old release just before it.
+ *
+ * A module-kit release is installed in every shop, so after the upgrade the module and every hook must be in every
+ * shop, and a configuration key that the old release did not have may only have a global value (Upgrade::apply() writes
+ * defaults globally, MS-03). A legacy release (one without composer.json: a module from before module-kit, upgraded to
+ * a new major in the module-kit structure) was installed the way that old code did it, e.g. in the default shop only
+ * from bin/console, and may have saved its settings per shop. Its upgrade keeps that: the module stays enabled in the
+ * same shops as before, and a new key may have the shop and group rows of a key that is gone after the upgrade (a
+ * renamed key keeps the merchant's values per shop), next to its global value. Hooks are registered for every shop in
+ * both cases (module_shop decides where the module runs).
+ *
+ * @param array<string, mixed> $before snapshot of the old release, installed, before the upgrade
+ * @param array<string, mixed> $after snapshot after the upgrade
+ * @param int[] $allShops ids of every shop
+ *
+ * @return string[] the problems, empty when the state is right
+ */
+function msUpgradeStateProblems(array $before, array $after, array $allShops, bool $legacy): array
+{
+    $problems = [];
+    $expectedShops = $legacy ? array_values((array) ($before['module_shops'] ?? [])) : $allShops;
+    if (array_values((array) ($after['module_shops'] ?? [])) !== $expectedShops) {
+        $problems[] = 'after the upgrade the module is enabled in shops ' . json_encode($after['module_shops'] ?? [])
+            . ($legacy ? ', before the upgrade in ' . json_encode($expectedShops) : '');
+    }
+    foreach ((array) ($after['hook_shops'] ?? []) as $hook => $shops) {
+        if ($shops !== $allShops) {
+            $problems[] = "after the upgrade hook $hook is registered for shops " . json_encode($shops);
+        }
+    }
+    $beforeScopes = (array) ($before['configuration_scopes'] ?? []);
+    $afterScopes = (array) ($after['configuration_scopes'] ?? []);
+    // The shop and group rows of the keys the upgrade removed: a renamed key takes them over.
+    $removedScopes = [];
+    foreach (array_diff_key($beforeScopes, $afterScopes) as $scopes) {
+        $removedScopes = array_merge($removedScopes, array_diff((array) $scopes, ['global']));
+    }
+    $removedScopes = array_values(array_unique($removedScopes));
+    foreach ($afterScopes as $key => $scopes) {
+        if (isset($beforeScopes[$key])) {
+            continue;
+        }
+        $scopes = (array) $scopes;
+        $extra = array_diff($scopes, ['global'], $legacy ? $removedScopes : []);
+        if (!$legacy && $scopes !== ['global']) {
+            $problems[] = "new configuration $key has rows " . json_encode($scopes) . ', expected only a global value';
+        } elseif ($legacy && (!in_array('global', $scopes, true) || $extra !== [])) {
+            $problems[] = "new configuration $key has rows " . json_encode($scopes)
+                . ', expected a global value plus at most the shop and group rows of a removed key ' . json_encode($removedScopes);
+        }
+    }
+
+    return $problems;
 }
 
 /**

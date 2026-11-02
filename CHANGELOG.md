@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.26.0] - 2026-11-02
+
+### Gewijzigd
+- Multistore-ronde, upgrade vanaf een **legacy release** (een tag zonder `composer.json`: een module van vóór
+  module-kit, bijvoorbeeld een Addons-module die als nieuwe major in de PrestaHaven-structuur is herschreven): de module
+  hoeft na de upgrade alleen aan te staan in de winkels waar de oude versie aan stond (die installeerde via `bin/console`
+  alleen in de standaardwinkel), en een nieuwe configuratiesleutel mag naast zijn globale waarde de winkel- en groepsrijen
+  houden van een sleutel die bij de upgrade verdween (hernoemde sleutels houden de waarden per winkel van de winkelier).
+  Hooks moeten nog steeds in elke winkel staan. Voor upgrades vanaf een module-kit-release blijft alles even streng.
+  Nieuwe functie `msUpgradeStateProblems()` met tests. Gevonden met `heavendeliverycopy` 1.0.1 -> 2.0.0.
+
+### Toegevoegd
+- `testing.json > legacy_configuration_prefixes` (bijv. `["HEAVEN_DELIVERY_COPY"]`): de sleutelprefixen van een oudere
+  versie van de module met een andere naamgeving. De snapshots van `ps-module shops` (`ps-probe.php`, dat nu een lijst
+  prefixen aanneemt) zien die sleutels dan ook: de upgradetests zien dat ze hernoemd worden, en na een uninstall mag er
+  ook van die sleutels niets overblijven.
+
 ## [1.25.4] - 2026-10-30
 
 ### Opgelost
